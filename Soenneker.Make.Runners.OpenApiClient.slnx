@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/.github/">
+    <File Path=".github/renovate.json" />
+  </Folder>
+  <Folder Name="/.github/workflows/">
+    <File Path=".github/workflows/build-and-test.yml" />
+    <File Path=".github/workflows/codeql.yml" />
+    <File Path=".github/workflows/daily-automatic-update.yml" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Soenneker.Make.Runners.OpenApiClient/Soenneker.Make.Runners.OpenApiClient.csproj" />
+  </Folder>
+  <Folder Name="/test/">
+    <Project Path="test/Soenneker.Make.Runners.OpenApiClient.Tests/Soenneker.Make.Runners.OpenApiClient.Tests.csproj" />
+  </Folder>
+</Solution>
