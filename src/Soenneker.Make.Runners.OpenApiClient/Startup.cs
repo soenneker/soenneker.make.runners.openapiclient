@@ -3,6 +3,7 @@ using Soenneker.Kiota.Util.Registrars;
 using Soenneker.Managers.Runners.Registrars;
 using Soenneker.Make.Runners.OpenApiClient.Utils;
 using Soenneker.Make.Runners.OpenApiClient.Utils.Abstract;
+using Soenneker.OpenApi.Fixer.Registrars;
 using Soenneker.Utils.File.Download.Registrars;
 
 namespace Soenneker.Make.Runners.OpenApiClient;
@@ -24,6 +25,7 @@ public static class Startup
                 .AddSingleton<IFileOperationsUtil, FileOperationsUtil>()
                 .AddRunnersManagerAsSingleton()
                 .AddFileDownloadUtilAsSingleton()
+                .AddOpenApiFixerAsSingleton()
                 .AddKiotaUtilAsSingleton();
 
         return services;
