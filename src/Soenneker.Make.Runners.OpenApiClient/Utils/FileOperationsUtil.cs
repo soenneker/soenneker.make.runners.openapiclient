@@ -21,7 +21,6 @@ using System.Collections.Generic;
 
 namespace Soenneker.Make.Runners.OpenApiClient.Utils;
 
-/// <inheritdoc cref="IFileOperationsUtil"/>
 public sealed class FileOperationsUtil : IFileOperationsUtil
 {
     private readonly ILogger<FileOperationsUtil> _logger;
@@ -52,31 +51,38 @@ public sealed class FileOperationsUtil : IFileOperationsUtil
     {
         string gitDirectory = await _gitUtil.CloneToTempDirectory($"https://github.com/soenneker/{Constants.Library.ToLowerInvariantFast()}", cancellationToken: cancellationToken);
 
-        string targetFilePath = Path.Combine(gitDirectory, "openapi.json");
+        try
+        {
+            string targetFilePath = Path.Combine(gitDirectory, "openapi.json");
 
-        await _fileUtil.DeleteIfExists(targetFilePath, cancellationToken: cancellationToken);
+            await _fileUtil.DeleteIfExists(targetFilePath, cancellationToken: cancellationToken);
 
-        string openApiDocumentUrl = _configuration["Make:ClientGenerationUrl"] ?? "https://us1.make.com/api/v2/openapi.json";
+            string openApiDocumentUrl = _configuration["Make:ClientGenerationUrl"] ?? "https://us1.make.com/api/v2/openapi.json";
 
-        string? filePath = await _fileDownloadUtil.Download(openApiDocumentUrl,
-            targetFilePath, fileExtension: ".json", cancellationToken: cancellationToken);
+            string? filePath = await _fileDownloadUtil.Download(openApiDocumentUrl,
+                targetFilePath, fileExtension: ".json", cancellationToken: cancellationToken);
 
-        if (filePath == null)
-            throw new InvalidOperationException("Make OpenAPI document download failed.");
+            if (filePath == null)
+                throw new InvalidOperationException("Make OpenAPI document download failed.");
 
-        string fixedFilePath = Path.Combine(gitDirectory, "openapi.fixed.json");
-        await _fileUtil.DeleteIfExists(fixedFilePath, cancellationToken: cancellationToken);
-        await _openApiFixer.Fix(filePath, fixedFilePath, cancellationToken);
+            string fixedFilePath = Path.Combine(gitDirectory, "openapi.fixed.json");
+            await _fileUtil.DeleteIfExists(fixedFilePath, cancellationToken: cancellationToken);
+            await _openApiFixer.Fix(filePath, fixedFilePath, cancellationToken);
 
-        await _kiotaUtil.EnsureInstalled(cancellationToken);
+            await _kiotaUtil.EnsureInstalled(cancellationToken);
 
-        string srcDirectory = Path.Combine(gitDirectory, "src", Constants.Library);
+            string srcDirectory = Path.Combine(gitDirectory, "src", Constants.Library);
 
-        await DeleteAllExceptCsproj(srcDirectory, cancellationToken);
+            await DeleteAllExceptCsproj(srcDirectory, cancellationToken);
 
-        await _kiotaUtil.Generate(fixedFilePath, "MakeOpenApiClient", Constants.Library, gitDirectory, cancellationToken).NoSync();
+            await _kiotaUtil.Generate(fixedFilePath, "MakeOpenApiClient", Constants.Library, gitDirectory, cancellationToken).NoSync();
 
-        await BuildAndPush(gitDirectory, cancellationToken).NoSync();
+            await BuildAndPush(gitDirectory, cancellationToken).NoSync();
+        }
+        finally
+        {
+            await _directoryUtil.DeleteIfExists(gitDirectory, CancellationToken.None);
+        }
     }
 
     /// <summary>
@@ -93,49 +99,28 @@ public sealed class FileOperationsUtil : IFileOperationsUtil
             return;
         }
 
-        try
+        // Delete all files except .csproj
+        List<string> files = await _directoryUtil.GetFilesByExtension(directoryPath, "", true, cancellationToken);
+        foreach (string file in files)
         {
-            // Delete all files except .csproj
-            List<string> files = await _directoryUtil.GetFilesByExtension(directoryPath, "", true, cancellationToken);
-            foreach (string file in files)
+            if (!file.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
             {
-                if (!file.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
-                {
-                    try
-                    {
-                        await _fileUtil.Delete(file, ignoreMissing: true, log: false, cancellationToken);
-                        _logger.LogInformation("Deleted file: {FilePath}", file);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Failed to delete file: {FilePath}", file);
-                    }
-                }
-            }
-
-            // Delete all empty subdirectories
-            List<string> dirs = await _directoryUtil.GetAllDirectoriesRecursively(directoryPath, cancellationToken);
-            foreach (string dir in dirs.OrderByDescending(d => d.Length)) // Sort by depth to delete from deepest first
-            {
-                try
-                {
-                    List<string> dirFiles = await _directoryUtil.GetFilesByExtension(dir, "", false, cancellationToken);
-                    List<string> subDirs = await _directoryUtil.GetAllDirectories(dir, cancellationToken);
-                    if (dirFiles.Count == 0 && subDirs.Count == 0)
-                    {
-                        await _directoryUtil.Delete(dir, cancellationToken);
-                        _logger.LogInformation("Deleted empty directory: {DirectoryPath}", dir);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to delete directory: {DirectoryPath}", dir);
-                }
+                await _fileUtil.Delete(file, ignoreMissing: true, log: false, cancellationToken);
+                _logger.LogInformation("Deleted file: {FilePath}", file);
             }
         }
-        catch (Exception ex)
+
+        // Delete all empty subdirectories
+        List<string> dirs = await _directoryUtil.GetAllDirectoriesRecursively(directoryPath, cancellationToken);
+        foreach (string dir in dirs.OrderByDescending(d => d.Length)) // Sort by depth to delete from deepest first
         {
-            _logger.LogError(ex, "An error occurred while cleaning the directory: {DirectoryPath}", directoryPath);
+            List<string> dirFiles = await _directoryUtil.GetFilesByExtension(dir, "", false, cancellationToken);
+            List<string> subDirs = await _directoryUtil.GetAllDirectories(dir, cancellationToken);
+            if (dirFiles.Count == 0 && subDirs.Count == 0)
+            {
+                await _directoryUtil.Delete(dir, cancellationToken);
+                _logger.LogInformation("Deleted empty directory: {DirectoryPath}", dir);
+            }
         }
     }
 
@@ -148,10 +133,7 @@ public sealed class FileOperationsUtil : IFileOperationsUtil
         bool successful = await _dotnetUtil.Build(projFilePath, true, "Release", false, cancellationToken: cancellationToken);
 
         if (!successful)
-        {
-            _logger.LogError("Build was not successful, exiting...");
-            return;
-        }
+            throw new InvalidOperationException($"{Constants.Library} build failed.");
 
         string gitHubToken = EnvironmentUtil.GetVariableStrict("GH__TOKEN");
         string name = EnvironmentUtil.GetVariableStrict("GIT__NAME");
